@@ -16,7 +16,7 @@ pipeline {
         }
         stage('Checkout from Git') {
             steps {
-                git branch: 'main', url: 'https://github.com/KastroVKiran/Book-My-Show.git'
+                git branch: 'main', url: 'https://github.com/Manohar-1305/bookmyshow.git'
                 sh 'ls -la'  // Verify files after checkout
             }
         }
@@ -52,12 +52,34 @@ pipeline {
                 '''
             }
         }
-        stage('OWASP FS Scan') {
-            steps {
-                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP-Check'
-                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
-            }
-        }
+
+stage('OSWAP Install Dependencies') {
+    steps {
+        sh '''
+        set -e  # Exit immediately if any command fails
+        cd bookmyshow-app
+
+        echo "Checking for package.json..."
+        if [ ! -f package.json ]; then
+            echo "Error: package.json not found in bookmyshow-app!"
+            exit 1
+        fi
+
+        echo "Removing old dependencies..."
+        rm -rf node_modules package-lock.json
+
+        echo "Installing dependencies..."
+        if [ -f package-lock.json ]; then
+            npm ci  # Faster and ensures a clean install based on lock file
+        else
+            npm install  # Falls back to regular install if no lock file is found
+        fi
+
+        echo "Dependency installation completed successfully!"
+        '''
+    }
+}
+
         stage('Trivy FS Scan') {
             steps {
                 sh 'trivy fs . > trivyfs.txt'
@@ -69,7 +91,7 @@ pipeline {
                     withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
                         sh ''' 
                         echo "Building Docker image..."
-                        docker build --no-cache -t kastrov/bms:latest -f bookmyshow-app/Dockerfile bookmyshow-app
+                        docker build --no-cache -t manoharshetty507/bms:latest -f bookmyshow-app/Dockerfile bookmyshow-app
 
                         echo "Pushing Docker image to registry..."
                         docker push kastrov/bms:latest
@@ -86,7 +108,7 @@ pipeline {
                 docker rm bms || true
 
                 echo "Running new container on port 3000..."
-                docker run -d --restart=always --name bms -p 3000:3000 kastrov/bms:latest
+                docker run -d --restart=always --name bms -p 3000:3000 manoharshetty507/bms:latest
 
                 echo "Checking running containers..."
                 docker ps -a
