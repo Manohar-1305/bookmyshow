@@ -1,4 +1,3 @@
-(without K8S Stage)
 pipeline {
     agent any
     tools {
@@ -17,7 +16,6 @@ pipeline {
         stage('Checkout from Git') {
             steps {
                 git branch: 'main', url: 'https://github.com/Manohar-1305/bookmyshow.git'
-                sh 'ls -la'  // Verify files after checkout
             }
         }
         stage('SonarQube Analysis') {
@@ -25,7 +23,7 @@ pipeline {
                 withSonarQubeEnv('sonar-server') {
                     sh ''' 
                     $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=BMS \
-                    -Dsonar.projectKey=BMS 
+                    -Dsonar.projectKey=BMS
                     '''
                 }
             }
@@ -37,23 +35,7 @@ pipeline {
                 }
             }
         }
-        stage('Install Dependencies') {
-            steps {
-                sh '''
-                cd bookmyshow-app
-                ls -la  # Verify package.json exists
-                if [ -f package.json ]; then
-                    rm -rf node_modules package-lock.json  # Remove old dependencies
-                    npm install  # Install fresh dependencies
-                else
-                    echo "Error: package.json not found in bookmyshow-app!"
-                    exit 1
-                fi
-                '''
-            }
-        }
-
-stage('OSWAP Install Dependencies') {
+ stage('Install Dependencies') {
     steps {
         sh '''
         set -e  # Exit immediately if any command fails
@@ -80,9 +62,18 @@ stage('OSWAP Install Dependencies') {
     }
 }
 
+        stage('OWASP FS Scan') {
+            steps {
+                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP-Check'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
         stage('Trivy FS Scan') {
             steps {
-                sh 'trivy fs . > trivyfs.txt'
+                sh '''
+                echo "Running Trivy FS scan..."
+                trivy fs --format table --severity HIGH,CRITICAL . > trivyfs.txt
+                '''
             }
         }
         stage('Docker Build & Push') {
@@ -90,6 +81,9 @@ stage('OSWAP Install Dependencies') {
                 script {
                     withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
                         sh ''' 
+                        echo "Cleaning up old Docker images..."
+                        docker image prune -f
+
                         echo "Building Docker image..."
                         docker build --no-cache -t manoharshetty507/bms:latest -f bookmyshow-app/Dockerfile bookmyshow-app
 
@@ -110,11 +104,8 @@ stage('OSWAP Install Dependencies') {
                 echo "Running new container on port 3000..."
                 docker run -d --restart=always --name bms -p 3000:3000 manoharshetty507/bms:latest
 
-                echo "Checking running containers..."
-                docker ps -a
-
                 echo "Fetching logs..."
-                sleep 5  # Give time for the app to start
+                sleep 5  # Allow some time for the app to start
                 docker logs bms
                 '''
             }
@@ -123,12 +114,14 @@ stage('OSWAP Install Dependencies') {
     post {
         always {
             emailext attachLog: true,
-                subject: "'${currentBuild.result}'",
-                body: "Project: ${env.JOB_NAME}<br/>" +
-                      "Build Number: ${env.BUILD_NUMBER}<br/>" +
-                      "URL: ${env.BUILD_URL}<br/>",
-                to: 'kastrokiran@gmail.com',
-                attachmentsPattern: 'trivyfs.txt,trivyimage.txt'
+                subject: "Build '${currentBuild.result}' for ${env.JOB_NAME}",
+                body: """
+                    <p><b>Project:</b> ${env.JOB_NAME}</p>
+                    <p><b>Build Number:</b> ${env.BUILD_NUMBER}</p>
+                    <p><b>Build URL:</b> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+                """,
+                to: 'tradingcontendrive@gmail.com',
+                attachmentsPattern: 'trivyfs.txt'
         }
     }
 }
